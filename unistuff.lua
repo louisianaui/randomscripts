@@ -1,16 +1,42 @@
+task.spawn(function()
+    if not game:IsLoaded() then game.Loaded:Wait() end
+    print([[                                .
+   ___                      __ __     __ 
+  / _ )__ _____  ___  __ __/ // /_ __/ / 
+ / _  / // / _ \/ _ \/ // / _  / // / _ \
+/____/\_,_/_//_/_//_/\_, /_//_/\_,_/_.__/
+                    /___/                
+.]])
+end)
+
+-- Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Lighting = game:GetService("Lighting")
-local Workspace = game.Workspace
+local Workspace = game:GetService("Workspace")
 
-local Obsidian = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/Library.lua"))()
+local Repository = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
+local Library = loadstring(game:HttpGet(Repository .. "Library.lua"))()
+local ThemeManager = loadstring(game:HttpGet(Repository .. "addons/ThemeManager.lua"))()
+local SaveManager = loadstring(game:HttpGet(Repository .. "addons/SaveManager.lua"))()
 
-local Window = Obsidian:CreateWindow({
+local Options = Library.Options
+local Toggles = Library.Toggles
+
+local player = Players.LocalPlayer
+
+-- System Variables
+local fovValue = nil
+local fovLoop = nil
+local espEnabled = false
+local espHighlights = {}
+
+-- UI
+local Window = Library:CreateWindow({
     Title = "Universal by usagiinc",
     Center = true,
     AutoShow = true,
-    TabPadding = 8,
-    MenuFadeTime = 0.2
+    Size = UDim2.fromOffset(700, 500)
 })
 
 local Tabs = {
@@ -19,17 +45,14 @@ local Tabs = {
     Config = Window:AddTab("Config")
 }
 
---// FOV HANDLER
-local fovValue = nil
-local fovLoop = nil
-
+-- FOV Handler (from unistuff)
 local function updateFOV(value)
     if fovLoop then fovLoop:Disconnect() fovLoop = nil end
-    
+
     if value then
         fovValue = value
         Workspace.CurrentCamera.FieldOfView = fovValue
-        
+
         fovLoop = RunService.RenderStepped:Connect(function()
             if Workspace.CurrentCamera.FieldOfView ~= fovValue then
                 Workspace.CurrentCamera.FieldOfView = fovValue
@@ -40,13 +63,10 @@ local function updateFOV(value)
     end
 end
 
---// ESP HANDLER
-local espEnabled = false
-local espHighlights = {}
-
+-- ESP Handler (from unistuff)
 local function toggleESP(value)
     espEnabled = value
-    
+
     if value then
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= Players.LocalPlayer and not espHighlights[player] then
@@ -56,13 +76,13 @@ local function toggleESP(value)
                 highlight.FillTransparency = 1
                 highlight.OutlineColor = Color3.new(1, 1, 1)
                 highlight.OutlineTransparency = 0
-                
+
                 espHighlights[player] = highlight
-                
+
                 local function updateCharacter()
                     highlight.Adornee = player.Character
                 end
-                
+
                 updateCharacter()
                 player.CharacterAdded:Connect(updateCharacter)
                 player.CharacterRemoving:Connect(function()
@@ -78,33 +98,41 @@ local function toggleESP(value)
     end
 end
 
---// ANTILAG HANDLER
-local function optimizeGraphics()
+-- Anti-Lag Features (your requests)
+local function removeLightingInstances()
+    local count = 0
+    for _, child in ipairs(Lighting:GetChildren()) do
+        if child:IsA("PostEffect") or child:IsA("Atmosphere") or 
+           child:IsA("BloomEffect") or child:IsA("BlurEffect") or 
+           child:IsA("SunRaysEffect") then
+            child:Destroy()
+            count = count + 1
+        end
+    end
+    return count
+end
+
+local function removeTextures()
+    local count = 0
     for _, part in ipairs(Workspace:GetDescendants()) do
         if part:IsA("BasePart") or part:IsA("MeshPart") then
             part.Material = Enum.Material.SmoothPlastic
             for _, child in ipairs(part:GetChildren()) do
-                if child:IsA("Decal") then
+                if child:IsA("Decal") or child:IsA("Texture") then
                     child:Destroy()
+                    count = count + 1
                 end
             end
         end
     end
-    
-    Lighting.GlobalShadows = false
-    Lighting.ShadowSoftness = 0
-    Lighting.ClockTime = 14
-    Lighting.Brightness = 0
-    Lighting.Ambient = Color3.new(0, 0, 0)
-    Lighting.OutdoorAmbient = Color3.new(0, 0, 0)
-    Lighting.FogEnd = 1000000
+    return count
 end
 
---// VISUALS TAB
+-- VISUALS TAB
 do
     local CameraGroupbox = Tabs.Visuals:AddLeftGroupbox("Camera")
     local ESPGroupbox = Tabs.Visuals:AddRightGroupbox("ESP")
-    
+
     CameraGroupbox:AddInput("FOV", {
         Default = "70",
         Numeric = true,
@@ -115,72 +143,121 @@ do
             updateFOV(tonumber(value))
         end
     })
-    
+
     CameraGroupbox:AddButton("Reset FOV", function()
         updateFOV(70)
-        Obsidian:Notify("FOV Reset", "Field of View reset to default (70).")
+        Library:Notify({
+            Title = "FOV Reset",
+            Description = "Field of View reset to default (70).",
+            Time = 2
+        })
     end)
-    
+
     ESPGroupbox:AddToggle("ESP", {
         Text = "Enable ESP",
         Default = false,
         Callback = toggleESP
     })
-    
+
     ESPGroupbox:AddLabel("Displays player outlines")
 end
 
---// MISC TAB
+-- MISC TAB
 do
-    local OptimizationGroupbox = Tabs.Misc:AddLeftGroupbox("Optimization")
-    
-    OptimizationGroupbox:AddButton("AntiLag", function()
-        optimizeGraphics()
-        Obsidian:Notify("AntiLag", "Graphics optimized for performance.")
+    local AntiLagGroupbox = Tabs.Misc:AddLeftGroupbox("AntiLag")
+    local TimeGroupbox = Tabs.Misc:AddRightGroupbox("Time")
+
+    AntiLagGroupbox:AddButton("Remove Lighting Instances", function()
+        local count = removeLightingInstances()
+        Library:Notify({
+            Title = "Lighting Cleanup",
+            Description = "Removed " .. count .. " lighting instances",
+            Time = 2
+        })
     end)
-    
-    OptimizationGroupbox:AddLabel("Removes textures & optimizes lighting")
+
+    AntiLagGroupbox:AddButton("Remove Textures/Decals", function()
+        local count = removeTextures()
+        Library:Notify({
+            Title = "Texture Removal",
+            Description = "Removed " .. count .. " textures/decals",
+            Time = 2
+        })
+    end)
+
+    AntiLagGroupbox:AddLabel("Removes post-effects and textures")
+
+    TimeGroupbox:AddSlider("TimeOfDay", {
+        Text = "Time of Day",
+        Default = 14,
+        Min = 0,
+        Max = 24,
+        Rounding = 1,
+        Compact = true,
+        Suffix = ":00",
+        Callback = function(value)
+            Lighting.ClockTime = value
+        end
+    })
+
+    TimeGroupbox:AddButton("Reset Time", function()
+        Options.TimeOfDay:SetValue(14)
+        Lighting.ClockTime = 14
+        Library:Notify({
+            Title = "Time Reset",
+            Description = "Time reset to 14:00",
+            Time = 2
+        })
+    end)
 end
 
---// CONFIG TAB
+-- CONFIG TAB (EXACT f.lua structure)
 do
     local MenuGroupbox = Tabs.Config:AddLeftGroupbox("Menu")
     local ConfigGroupbox = Tabs.Config:AddRightGroupbox("Configuration")
-    
+
     MenuGroupbox:AddButton("Unload", function()
-        Window:Close()
+        Library:Unload()
     end)
-    
+
     local MenuKeybindLabel = MenuGroupbox:AddLabel("Menu bind")
     MenuKeybindLabel:AddKeyPicker("MenuKeybind", {
         Default = "RightShift",
         NoUI = false,
         Text = "Menu keybind"
     })
-    
-    Window:SetKeybind(Options.MenuKeybind.Value)
-    
-    Obsidian.ThemeManager:SetFolder("Universal")
-    Obsidian.SaveManager:SetFolder("Universal/Config")
-    Obsidian.SaveManager:IgnoreThemeSettings()
-    Obsidian.SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
-    
-    Obsidian.ThemeManager:BuildInterfaceSection(ConfigGroupbox)
-    Obsidian.SaveManager:BuildConfigSection(ConfigGroupbox)
-    Obsidian.ThemeManager:ApplyToTab(Tabs.Config)
-    
+
+    Library.ToggleKeybind = Options.MenuKeybind
+
+    ThemeManager:SetFolder("Universal")
+    SaveManager:SetFolder("Universal/Config")
+    SaveManager:IgnoreThemeSettings()
+    SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
+
+    ThemeManager:BuildInterfaceSection(ConfigGroupbox)
+    SaveManager:BuildConfigSection(ConfigGroupbox)
+    ThemeManager:ApplyToTab(Tabs.Config)
+
     MenuGroupbox:AddButton("Save", function()
-        Obsidian.SaveManager:Save("UniversalConfig")
-        Obsidian:Notify("Settings Saved", "Configuration saved successfully.")
+        SaveManager:Save("UniversalConfig")
+        Library:Notify({
+            Title = "Settings Saved",
+            Description = "Configuration saved successfully.",
+            Time = 2
+        })
     end)
-    
+
     MenuGroupbox:AddButton("Load", function()
-        Obsidian.SaveManager:Load("UniversalConfig")
-        Obsidian:Notify("Settings Loaded", "Configuration loaded successfully.")
+        SaveManager:Load("UniversalConfig")
+        Library:Notify({
+            Title = "Settings Loaded",
+            Description = "Configuration loaded successfully.",
+            Time = 2
+        })
     end)
 end
 
---// EVENT HANDLERS
+-- Event Handlers
 Players.PlayerAdded:Connect(function(player)
     if espEnabled and player ~= Players.LocalPlayer then
         task.wait(1)
@@ -201,4 +278,8 @@ Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
     end
 end)
 
-Obsidian:Notify("Universal", "Script loaded successfully by usagiinc")
+Library:Notify({
+    Title = "Universal",
+    Description = "Script loaded successfully by usagiinc",
+    Time = 3
+})
