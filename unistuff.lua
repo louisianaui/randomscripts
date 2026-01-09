@@ -29,7 +29,8 @@ local player = Players.LocalPlayer
 local fovValue = nil
 local fovLoop = nil
 local espEnabled = false
-local espDrawings = {}
+local espHighlights = {}
+local espLoop = nil
 
 -- UI
 local Window = Library:CreateWindow({
@@ -63,146 +64,118 @@ local function updateFOV(value)
     end
 end
 
--- SIMPLE BOX ESP SYSTEM - NEW
-local function createDrawing(type, properties)
-    local drawing = Drawing.new(type)
-    for prop, value in pairs(properties) do
-        drawing[prop] = value
-    end
-    return drawing
-end
-
-local function initESP(targetPlayer)
-    if espDrawings[targetPlayer] then return end
+-- SIMPLE HIGHLIGHT ESP SYSTEM
+local function createHighlight(targetPlayer)
+    if espHighlights[targetPlayer] then return end
     
-    local drawings = {
-        BoxOutline = createDrawing("Quad", {
-            Visible = false,
-            Color = Color3.new(0, 0, 0),
-            Thickness = 2,
-            Filled = false,
-            Transparency = 1
-        }),
-        Box = createDrawing("Quad", {
-            Visible = false,
-            Color = Color3.fromRGB(255, 50, 50),
-            Thickness = 1,
-            Filled = false,
-            Transparency = 1
-        }),
-        HealthBarOutline = createDrawing("Line", {
-            Visible = false,
-            Color = Color3.new(0, 0, 0),
-            Thickness = 4,
-            Transparency = 1
-        }),
-        HealthBar = createDrawing("Line", {
-            Visible = false,
-            Thickness = 2,
-            Transparency = 1
-        })
+    local character = targetPlayer.Character
+    if not character then return end
+    
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "ESP_Highlight"
+    highlight.Adornee = character
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.FillColor = Color3.fromRGB(255, 50, 50) -- Red for enemies
+    highlight.FillTransparency = 0.5
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    highlight.OutlineTransparency = 0
+    highlight.Parent = character
+    
+    espHighlights[targetPlayer] = {
+        highlight = highlight,
+        player = targetPlayer
     }
     
-    local connection
-    connection = RunService.RenderStepped:Connect(function()
-        if not espEnabled or not targetPlayer or not targetPlayer.Character then
-            for _, drawing in pairs(drawings) do
-                drawing.Visible = false
-            end
-            return
+    -- Listen for character changes (respawns)
+    local characterAddedConnection
+    characterAddedConnection = targetPlayer.CharacterAdded:Connect(function(newCharacter)
+        if espHighlights[targetPlayer] and espHighlights[targetPlayer].highlight then
+            espHighlights[targetPlayer].highlight:Destroy()
         end
         
-        local character = targetPlayer.Character
-        local humanoid = character:FindFirstChild("Humanoid")
-        local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+        local newHighlight = Instance.new("Highlight")
+        newHighlight.Name = "ESP_Highlight"
+        newHighlight.Adornee = newCharacter
+        newHighlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        newHighlight.FillColor = Color3.fromRGB(255, 255, 255)
+        newHighlight.FillTransparency = 0.5
+        newHighlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+        newHighlight.OutlineTransparency = 0
+        newHighlight.Parent = newCharacter
         
-        if not humanoid or not humanoidRootPart or humanoid.Health <= 0 then
-            for _, drawing in pairs(drawings) do
-                drawing.Visible = false
-            end
-            return
-        end
-        
-        local camera = Workspace.CurrentCamera
-        local position, onScreen = camera:WorldToViewportPoint(humanoidRootPart.Position)
-        
-        if not onScreen then
-            for _, drawing in pairs(drawings) do
-                drawing.Visible = false
-            end
-            return
-        end
-        
-        -- Calculate box size
-        local distance = (camera.CFrame.Position - humanoidRootPart.Position).Magnitude
-        local scale = math.clamp(1000 / distance, 0.5, 3)
-        local width = 25 * scale
-        local height = 45 * scale
-        
-        -- Box coordinates
-        local topLeft = Vector2.new(position.X - width/2, position.Y - height/2)
-        local topRight = Vector2.new(position.X + width/2, position.Y - height/2)
-        local bottomLeft = Vector2.new(position.X - width/2, position.Y + height/2)
-        local bottomRight = Vector2.new(position.X + width/2, position.Y + height/2)
-        
-        -- Update box
-        drawings.BoxOutline.PointA = topLeft
-        drawings.BoxOutline.PointB = topRight
-        drawings.BoxOutline.PointC = bottomRight
-        drawings.BoxOutline.PointD = bottomLeft
-        
-        drawings.Box.PointA = topLeft
-        drawings.Box.PointB = topRight
-        drawings.Box.PointC = bottomRight
-        drawings.Box.PointD = bottomLeft
-        
-        -- Health bar
-        local healthPercent = humanoid.Health / humanoid.MaxHealth
-        local healthHeight = height * healthPercent
-        
-        drawings.HealthBarOutline.From = Vector2.new(position.X - width/2 - 6, position.Y + height/2)
-        drawings.HealthBarOutline.To = Vector2.new(position.X - width/2 - 6, position.Y - height/2)
-        
-        drawings.HealthBar.From = Vector2.new(position.X - width/2 - 6, position.Y + height/2)
-        drawings.HealthBar.To = Vector2.new(position.X - width/2 - 6, position.Y + height/2 - healthHeight)
-        
-        -- Health bar color
-        local green = Color3.fromRGB(0, 255, 0)
-        local red = Color3.fromRGB(255, 0, 0)
-        drawings.HealthBar.Color = red:lerp(green, healthPercent)
-        
-        -- Team color check
-        if targetPlayer.Team and player.Team then
-            if targetPlayer.Team == player.Team then
-                drawings.Box.Color = Color3.fromRGB(50, 255, 50) -- Green for teammates
-            else
-                drawings.Box.Color = Color3.fromRGB(255, 50, 50) -- Red for enemies
-            end
-        end
-        
-        -- Show all drawings
-        for _, drawing in pairs(drawings) do
-            drawing.Visible = true
+        espHighlights[targetPlayer].highlight = newHighlight
+        espHighlights[targetPlayer].character = newCharacter
+    end)
+    
+    -- Listen for character removal (death)
+    local characterRemovingConnection
+    characterRemovingConnection = targetPlayer.CharacterRemoving:Connect(function()
+        if espHighlights[targetPlayer] and espHighlights[targetPlayer].highlight then
+            espHighlights[targetPlayer].highlight:Destroy()
+            espHighlights[targetPlayer].highlight = nil
         end
     end)
     
-    drawings.connection = connection
-    espDrawings[targetPlayer] = drawings
+    -- Store connections for cleanup
+    espHighlights[targetPlayer].connections = {
+        characterAdded = characterAddedConnection,
+        characterRemoving = characterRemovingConnection
+    }
 end
 
-local function removeESP(targetPlayer)
-    if espDrawings[targetPlayer] then
-        if espDrawings[targetPlayer].connection then
-            espDrawings[targetPlayer].connection:Disconnect()
+local function removeHighlight(targetPlayer)
+    if espHighlights[targetPlayer] then
+        -- Clean up highlight
+        if espHighlights[targetPlayer].highlight then
+            espHighlights[targetPlayer].highlight:Destroy()
         end
         
-        for name, drawing in pairs(espDrawings[targetPlayer]) do
-            if name ~= "connection" and drawing and drawing.Remove then
-                drawing:Remove()
+        -- Disconnect events
+        if espHighlights[targetPlayer].connections then
+            for _, connection in pairs(espHighlights[targetPlayer].connections) do
+                if connection then
+                    connection:Disconnect()
+                end
             end
         end
         
-        espDrawings[targetPlayer] = nil
+        espHighlights[targetPlayer] = nil
+    end
+end
+
+local function isEnemy(targetPlayer)
+    -- Check if target is on a different team
+    if targetPlayer.Team and player.Team then
+        return targetPlayer.Team ~= player.Team
+    end
+    -- If no teams exist, consider everyone enemy except yourself
+    return targetPlayer ~= player
+end
+
+local function updateHighlights()
+    if not espEnabled then return end
+    
+    -- Update existing highlights based on team status
+    for targetPlayer, data in pairs(espHighlights) do
+        if targetPlayer and data and data.highlight then
+            local shouldHighlight = isEnemy(targetPlayer)
+            
+            if shouldHighlight then
+                -- Enemy - show highlight
+                data.highlight.Enabled = true
+                data.highlight.FillColor = Color3.fromRGB(255, 255, 255)
+            else
+                -- Teammate or self - hide highlight
+                data.highlight.Enabled = false
+            end
+        end
+    end
+    
+    -- Create highlights for new enemies
+    for _, targetPlayer in ipairs(Players:GetPlayers()) do
+        if targetPlayer ~= player and isEnemy(targetPlayer) and not espHighlights[targetPlayer] then
+            createHighlight(targetPlayer)
+        end
     end
 end
 
@@ -210,17 +183,34 @@ local function toggleESP(value)
     espEnabled = value
     
     if value then
-        -- Initialize ESP for existing players
+        -- Start ESP loop
+        if espLoop then
+            espLoop:Disconnect()
+        end
+        
+        espLoop = RunService.Heartbeat:Connect(function()
+            updateHighlights()
+        end)
+        
+        -- Initialize highlights for existing enemies
         for _, targetPlayer in ipairs(Players:GetPlayers()) do
-            if targetPlayer ~= player then
-                initESP(targetPlayer)
+            if targetPlayer ~= player and isEnemy(targetPlayer) then
+                createHighlight(targetPlayer)
             end
         end
+        
     else
-        -- Clean up all ESP drawings
-        for targetPlayer, drawings in pairs(espDrawings) do
-            removeESP(targetPlayer)
+        -- Stop ESP loop
+        if espLoop then
+            espLoop:Disconnect()
+            espLoop = nil
         end
+        
+        -- Clean up all highlights
+        for targetPlayer, _ in pairs(espHighlights) do
+            removeHighlight(targetPlayer)
+        end
+        espHighlights = {}
     end
 end
 
@@ -280,12 +270,12 @@ do
     end)
 
     ESPGroupbox:AddToggle("ESP", {
-        Text = "Enable ESP",
+        Text = "Enable Enemy Highlight",
         Default = false,
         Callback = toggleESP
     })
 
-    ESPGroupbox:AddLabel("Simple 2D Box ESP with Health Bars")
+    ESPGroupbox:AddLabel("Highlights enemy players in red")
 end
 
 -- MISC TAB
@@ -407,15 +397,51 @@ end
 
 -- Event Handlers
 Players.PlayerAdded:Connect(function(newPlayer)
-    if espEnabled and newPlayer ~= player then
-        task.wait(1)
-        initESP(newPlayer)
+    if espEnabled then
+        task.wait(1) -- Wait for character to load
+        if isEnemy(newPlayer) then
+            createHighlight(newPlayer)
+        end
     end
 end)
 
 Players.PlayerRemoving:Connect(function(leavingPlayer)
-    if espDrawings[leavingPlayer] then
-        removeESP(leavingPlayer)
+    removeHighlight(leavingPlayer)
+end)
+
+-- Team change detection
+local function monitorTeamChanges()
+    while true do
+        for targetPlayer, data in pairs(espHighlights) do
+            if targetPlayer and targetPlayer.Team then
+                -- Team property exists, check if highlight needs updating
+                local wasEnemy = data.highlight and data.highlight.Enabled
+                local isNowEnemy = isEnemy(targetPlayer)
+                
+                if wasEnemy ~= isNowEnemy then
+                    -- Team status changed, update highlight
+                    if data.highlight then
+                        data.highlight.Enabled = isNowEnemy
+                    end
+                end
+            end
+        end
+        wait(0.5) -- Check every 0.5 seconds
+    end
+end
+
+-- Start team monitoring when ESP is enabled
+local teamMonitorThread = nil
+Toggles.ESP:OnChanged(function(value)
+    if value then
+        if teamMonitorThread then
+            coroutine.close(teamMonitorThread)
+        end
+        teamMonitorThread = coroutine.create(monitorTeamChanges)
+        coroutine.resume(teamMonitorThread)
+    elseif teamMonitorThread then
+        coroutine.close(teamMonitorThread)
+        teamMonitorThread = nil
     end
 end)
 
